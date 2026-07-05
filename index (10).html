@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Sakaw Chess | ساكاو تشيس — تعلّم استراتيجيات الشطرنج</title>
+
+<!-- Fonts: Amiri for display Arabic, Tajawal for body Arabic, JetBrains Mono for notation -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Amiri:ital,wght@0,400;0,700;1,400&family=Tajawal:wght@300;400;500;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+
+<!-- Tailwind CSS -->
+<script src="https://cdn.tailwindcss.com"></script>
+
+<!-- chess.js for move legality -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.3/chess.min.js"></script>
+
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        colors: {
+          charcoal: { DEFAULT: '#1B1F1D', 2: '#242925', 3: '#2E342F' },
+          ivory: { DEFAULT: '#F4F1E8', 2: '#EAE5D6' },
+          emerald: { DEFAULT: '#1F6F54', dark: '#154A38', light: '#2E9A76' },
+          gold: { DEFAULT: '#C9A24B', dim: '#9C7F3E', bright: '#E4C171' },
+        },
+        fontFamily: {
+          display: ['Amiri', 'serif'],
+          body: ['Tajawal', 'sans-serif'],
+          mono: ['JetBrains Mono', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+
+<style>
+  :root{
+    --charcoal: #1B1F1D;
+    --charcoal-2: #242925;
+    --emerald: #1F6F54;
+    --gold: #C9A24B;
+    --ivory: #F4F1E8;
+  }
+  html{ scroll-behavior: smooth; }
+  body{ font-family: 'Tajawal', sans-serif; background:var(--ivory); }
+  .font-display{ font-family:'Amiri', serif; }
+
+  /* subtle board-pattern texture for dark sections */
+  .board-texture{
+    background-image:
+      linear-gradient(rgba(201,162,75,0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(201,162,75,0.05) 1px, transparent 1px);
+    background-size: 42px 42px;
+  }
+
+  .view{ display:none; }
+  .view.active{ display:block; }
+
+  .fade-in{ animation: fadeIn .5s ease both; }
+  @keyframes fadeIn{ from{opacity:0; transform:translateY(8px);} to{opacity:1; transform:translateY(0);} }
+
+  /* Chessboard */
+  #board{
+    display:grid;
+    grid-template-columns: repeat(8, 1fr);
+    grid-template-rows: repeat(8, 1fr);
+    width:100%;
+    aspect-ratio: 1/1;
+    border: 3px solid var(--gold);
+    border-radius: 6px;
+    overflow:hidden;
+    box-shadow: 0 20px 45px -15px rgba(0,0,0,0.5);
+    direction: ltr; /* board geometry stays LTR regardless of page direction */
+  }
+  .sq{
+    position:relative;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    font-size: clamp(1.4rem, 5vw, 2.6rem);
+    cursor:pointer;
+    user-select:none;
+    transition: background-color .15s ease;
+  }
+  .sq.light{ background:#EFE7D5; }
+  .sq.dark{ background:#2F5E4E; }
+  .sq.selected{ box-shadow: inset 0 0 0 3px var(--gold); }
+  .sq.last-move{ background-image: linear-gradient(rgba(201,162,75,0.35), rgba(201,162,75,0.35)); }
+  .sq .dot{
+    position:absolute; width:26%; height:26%; border-radius:50%;
+    background: rgba(31,111,84,0.55);
+    pointer-events:none;
+  }
+  .sq .ring{
+    position:absolute; inset:6%; border-radius:50%;
+    border: 4px solid rgba(31,111,84,0.55);
+    pointer-events:none;
+  }
+  .sq .coord{
+    position:absolute; font-family:'JetBrains Mono', monospace; font-size:0.6rem;
+    color: rgba(0,0,0,0.35); pointer-events:none;
+  }
+  .sq .coord.file{ bottom:3px; right:4px; }
+  .sq .coord.rank{ top:3px; left:4px; }
+  .piece-white{ color:#fdfdfb; filter: drop-shadow(0 2px 2px rgba(0,0,0,0.55)); }
+  .piece-black{ color:#161616; filter: drop-shadow(0 1px 1px rgba(255,255,255,0.15)); }
+
+  .nav-link{ position:relative; }
+  .nav-link::after{
+    content:''; position:absolute; right:0; bottom:-6px; height:2px; width:0;
+    background:var(--gold); transition: width .25s ease;
+  }
+  .nav-link:hover::after, .nav-link.current::after{ width:100%; }
+
+  .cat-card{ transition: transform .35s ease, box-shadow .35s ease; }
+  .cat-card:hover{ transform: translateY(-6px); }
+
+  ::selection{ background: rgba(201,162,75,0.35); }
+
+  /* focus visibility */
+  a:focus-visible, button:focus-visible{
+    outline: 2px solid var(--gold); outline-offset: 3px;
+  }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+  }
+</style>
+</head>
+<body class="text-charcoal antialiased">
+
+<!-- ============ HEADER ============ -->
+<header class="sticky top-0 z-50 bg-charcoal/95 backdrop-blur border-b border-gold/20">
+  <div class="max-w-6xl mx-auto px-5 sm:px-8 h-16 flex items-center justify-between">
+    <button onclick="showView('home')" class="flex items-center gap-2 group">
+      <span class="text-gold text-2xl leading-none">♞</span>
+      <span class="font-display text-xl sm:text-2xl text-ivory tracking-wide">Sakaw <span class="text-gold">Chess</span></span>
+    </button>
+
+    <nav class="hidden md:flex items-center gap-8 text-ivory/90 font-medium">
+      <a href="#" onclick="showView('home');return false;" class="nav-link current" data-nav="home">الرئيسية</a>
+      <a href="#" onclick="showView('strategies');return false;" class="nav-link" data-nav="strategies">الاستراتيجيات</a>
+      <a href="#" onclick="showView('strategies');goCategory('openings');return false;" class="nav-link" data-nav="openings">الافتتاحيات</a>
+      <a href="#" onclick="showView('strategies');goCategory('middlegame');return false;" class="nav-link" data-nav="middlegame">وسط الدور</a>
+      <a href="#" onclick="showView('strategies');goCategory('endgame');return false;" class="nav-link" data-nav="endgame">النهايات</a>
+    </nav>
+
+    <button onclick="showView('strategies')" class="hidden md:inline-block bg-emerald hover:bg-emerald-light text-ivory px-5 py-2 rounded-full text-sm font-bold transition-colors">
+      ابدأ التدريب
+    </button>
+
+    <button id="menuBtn" onclick="toggleMenu()" class="md:hidden text-ivory text-2xl">☰</button>
+  </div>
+
+  <!-- mobile menu -->
+  <div id="mobileMenu" class="hidden md:hidden bg-charcoal-2 border-t border-gold/10 px-5 py-4 flex flex-col gap-4 text-ivory">
+    <a href="#" onclick="showView('home');toggleMenu();return false;">الرئيسية</a>
+    <a href="#" onclick="showView('strategies');toggleMenu();return false;">الاستراتيجيات</a>
+    <a href="#" onclick="showView('strategies');goCategory('openings');toggleMenu();return false;">الافتتاحيات</a>
+    <a href="#" onclick="showView('strategies');goCategory('middlegame');toggleMenu();return false;">وسط الدور</a>
+    <a href="#" onclick="showView('strategies');goCategory('endgame');toggleMenu();return false;">النهايات</a>
+  </div>
+</header>
+
+<main>
+
+  <!-- ============ HOME VIEW ============ -->
+  <section id="view-home" class="view active">
+
+    <!-- HERO -->
+    <div class="relative bg-charcoal board-texture overflow-hidden">
+      <div class="max-w-6xl mx-auto px-5 sm:px-8 py-24 sm:py-32 relative z-10 text-center">
+        <p class="text-gold font-mono text-sm tracking-widest mb-5">S A K A W &nbsp;•&nbsp; C H E S S &nbsp;•&nbsp; A C A D E M Y</p>
+        <h1 class="font-display text-4xl sm:text-6xl text-ivory leading-tight mb-6">
+          فكّر كبطل<span class="text-gold">،</span> تحرّك كأستاذ
+        </h1>
+        <p class="text-ivory/70 max-w-2xl mx-auto text-lg mb-10 leading-relaxed">
+          منصة عربية تفاعلية لتعلّم استراتيجيات الشطرنج، من الافتتاحيات الأولى إلى فنون النهايات،
+          مع رقعة شطرنج تفاعلية تتيح لك التجربة والتطبيق مباشرة أثناء التعلّم.
+        </p>
+        <div class="flex flex-wrap justify-center gap-4">
+          <button onclick="showView('strategies')" class="bg-gold hover:bg-gold-bright text-charcoal font-bold px-8 py-3.5 rounded-full transition-colors text-lg">
+            استكشف الاستراتيجيات
+          </button>
+          <button onclick="showView('strategies');goCategory('openings');goStrategy('italian');" class="border border-ivory/30 hover:border-gold text-ivory px-8 py-3.5 rounded-full transition-colors text-lg">
+            جرّب الرقعة الآن
+          </button>
+        </div>
+      </div>
+      <!-- decorative giant piece -->
+      <span aria-hidden="true" class="hidden sm:block absolute -left-10 bottom-[-40px] text-[18rem] text-gold/5 select-none pointer-events-none leading-none">♟</span>
+    </div>
+
+    <!-- INTRO STRIP -->
+    <div class="bg-ivory-2">
+      <div class="max-w-6xl mx-auto px-5 sm:px-8 py-14 grid sm:grid-cols-3 gap-8 text-center">
+        <div>
+          <p class="font-display text-3xl text-emerald mb-2">٣</p>
+          <p class="text-charcoal/80 font-medium">مراحل تعلّم أساسية: الافتتاحيات، وسط الدور، والنهايات</p>
+        </div>
+        <div>
+          <p class="font-display text-3xl text-emerald mb-2">تفاعلية</p>
+          <p class="text-charcoal/80 font-medium">رقعة شطرنج حقيقية تتيح لك تحريك القطع والتدرّب فعليًا</p>
+        </div>
+        <div>
+          <p class="font-display text-3xl text-emerald mb-2">بالعربية</p>
+          <p class="text-charcoal/80 font-medium">شروحات مبسّطة ومباشرة لكل استراتيجية</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- WHY SECTION -->
+    <div class="max-w-6xl mx-auto px-5 sm:px-8 py-20">
+      <div class="text-center mb-14">
+        <h2 class="font-display text-3xl sm:text-4xl mb-4">رحلتك نحو الاحتراف تبدأ من هنا</h2>
+        <p class="text-charcoal/60 max-w-xl mx-auto">اختر مرحلة اللعبة التي تريد تطويرها، اقرأ الشرح، وطبّق ما تعلّمته مباشرة على الرقعة.</p>
+      </div>
+      <div class="grid sm:grid-cols-3 gap-6">
+        <button onclick="showView('strategies');goCategory('openings')" class="cat-card text-right bg-charcoal text-ivory rounded-2xl p-8 border border-gold/20 hover:border-gold">
+          <span class="text-4xl">♞</span>
+          <h3 class="font-display text-2xl mt-4 mb-2">الافتتاحيات</h3>
+          <p class="text-ivory/60 text-sm leading-relaxed">ابدأ اللعبة بثقة عبر أشهر الافتتاحيات وأكثرها فعالية.</p>
+        </button>
+        <button onclick="showView('strategies');goCategory('middlegame')" class="cat-card text-right bg-charcoal text-ivory rounded-2xl p-8 border border-gold/20 hover:border-gold">
+          <span class="text-4xl">♛</span>
+          <h3 class="font-display text-2xl mt-4 mb-2">وسط الدور</h3>
+          <p class="text-ivory/60 text-sm leading-relaxed">تكتيكات وخطط متقدّمة للتحكّم في مسار اللعبة.</p>
+        </button>
+        <button onclick="showView('strategies');goCategory('endgame')" class="cat-card text-right bg-charcoal text-ivory rounded-2xl p-8 border border-gold/20 hover:border-gold">
+          <span class="text-4xl">♚</span>
+          <h3 class="font-display text-2xl mt-4 mb-2">النهايات</h3>
+          <p class="text-ivory/60 text-sm leading-relaxed">حوّل أفضلياتك الصغيرة إلى فوز محسوم في النهايات.</p>
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ STRATEGIES OVERVIEW VIEW ============ -->
+  <section id="view-strategies" class="view">
+    <div class="bg-charcoal board-texture py-16">
+      <div class="max-w-6xl mx-auto px-5 sm:px-8 text-center">
+        <p class="text-gold font-mono text-xs tracking-widest mb-3">STRATEGIES</p>
+        <h1 class="font-display text-4xl text-ivory mb-4">اختر مرحلة اللعبة</h1>
+        <p class="text-ivory/60 max-w-xl mx-auto">كل مرحلة تضمّ مجموعة من الاستراتيجيات، وكل استراتيجية تفتح لك رقعة تفاعلية للتطبيق.</p>
+      </div>
+    </div>
+
+    <div class="max-w-6xl mx-auto px-5 sm:px-8 py-16 grid sm:grid-cols-3 gap-6" id="categoryGrid">
+      <!-- filled by JS -->
+    </div>
+  </section>
+
+  <!-- ============ CATEGORY (STRATEGY LIST) VIEW ============ -->
+  <section id="view-category" class="view">
+    <div class="max-w-5xl mx-auto px-5 sm:px-8 py-16">
+      <button onclick="showView('strategies')" class="text-emerald font-bold mb-6 inline-flex items-center gap-1">
+        <span>→</span> رجوع إلى المراحل
+      </button>
+      <div id="categoryHeader" class="mb-10"></div>
+      <div id="strategyList" class="grid sm:grid-cols-2 gap-5"></div>
+    </div>
+  </section>
+
+  <!-- ============ PRACTICE (BOARD) VIEW ============ -->
+  <section id="view-practice" class="view">
+    <div class="max-w-6xl mx-auto px-5 sm:px-8 py-12">
+      <button id="backToCategoryBtn" class="text-emerald font-bold mb-6 inline-flex items-center gap-1">
+        <span>→</span> رجوع إلى القائمة
+      </button>
+
+      <div class="grid lg:grid-cols-5 gap-10">
+        <!-- board -->
+        <div class="lg:col-span-3">
+          <div id="board" role="grid" aria-label="رقعة الشطرنج التفاعلية"></div>
+          <div class="flex flex-wrap gap-3 mt-5">
+            <button onclick="resetPosition()" class="bg-emerald hover:bg-emerald-dark text-ivory px-5 py-2.5 rounded-full text-sm font-bold transition-colors">إعادة ضبط الوضع</button>
+            <button onclick="flipBoard()" class="border border-charcoal/20 hover:border-emerald px-5 py-2.5 rounded-full text-sm font-bold transition-colors">تدوير الرقعة</button>
+            <button onclick="undoMove()" class="border border-charcoal/20 hover:border-emerald px-5 py-2.5 rounded-full text-sm font-bold transition-colors">تراجع عن حركة</button>
+          </div>
+        </div>
+
+        <!-- info panel -->
+        <div class="lg:col-span-2">
+          <p id="practiceEyebrow" class="text-gold font-mono text-xs tracking-widest mb-2"></p>
+          <h1 id="practiceTitle" class="font-display text-3xl mb-4"></h1>
+          <p id="practiceDesc" class="text-charcoal/70 leading-relaxed mb-6"></p>
+
+          <div class="bg-ivory-2 rounded-xl p-5 mb-6 border border-charcoal/10">
+            <p class="text-xs font-bold text-emerald mb-2">💡 نصيحة تطبيقية</p>
+            <p id="practiceTip" class="text-sm text-charcoal/80 leading-relaxed"></p>
+          </div>
+
+          <div class="bg-charcoal text-ivory rounded-xl p-5">
+            <div class="flex items-center justify-between mb-3">
+              <p class="text-xs font-bold text-gold">حالة الرقعة</p>
+              <p id="turnIndicator" class="text-xs font-mono"></p>
+            </div>
+            <p id="statusText" class="text-sm text-ivory/80 mb-3 leading-relaxed"></p>
+            <p class="text-xs font-bold text-gold mb-2">سجل الحركات</p>
+            <div id="moveList" class="font-mono text-sm text-ivory/70 flex flex-wrap gap-x-3 gap-y-1 max-h-28 overflow-y-auto"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<!-- ============ FOOTER ============ -->
+<footer class="bg-charcoal border-t border-gold/15">
+  <div class="max-w-6xl mx-auto px-5 sm:px-8 py-14 grid sm:grid-cols-3 gap-10">
+    <div>
+      <div class="flex items-center gap-2 mb-3">
+        <span class="text-gold text-xl">♞</span>
+        <span class="font-display text-xl text-ivory">Sakaw <span class="text-gold">Chess</span></span>
+      </div>
+      <p class="text-ivory/50 text-sm leading-relaxed">منصتك العربية لتعلّم الشطرنج بأسلوب تفاعلي وعملي، خطوة بخطوة نحو الاحتراف.</p>
+    </div>
+    <div>
+      <p class="text-gold font-bold text-sm mb-3">الاستراتيجيات</p>
+      <ul class="text-ivory/60 text-sm space-y-2">
+        <li><a href="#" onclick="showView('strategies');goCategory('openings');return false;" class="hover:text-gold">الافتتاحيات</a></li>
+        <li><a href="#" onclick="showView('strategies');goCategory('middlegame');return false;" class="hover:text-gold">وسط الدور</a></li>
+        <li><a href="#" onclick="showView('strategies');goCategory('endgame');return false;" class="hover:text-gold">النهايات</a></li>
+      </ul>
+    </div>
+    <div>
+      <p class="text-gold font-bold text-sm mb-3">Sakaw Chess</p>
+      <p class="text-ivory/50 text-sm leading-relaxed">تم تصميم هذه المنصة لأغراض تعليمية تفاعلية لهواة ومحترفي الشطرنج الناطقين بالعربية.</p>
+    </div>
+  </div>
+  <div class="border-t border-gold/10 py-5 text-center text-ivory/40 text-xs">
+    © 2026 Sakaw Chess — جميع الحقوق محفوظة
+  </div>
+</footer>
+
+<script>
+/* ======================= DATA ======================= */
+const CATEGORIES = {
+  openings: {
+    label: 'الافتتاحيات', icon: '♞',
+    desc: 'الخطوات الأولى تحدّد شكل المعركة كلها. تعلّم أشهر الافتتاحيات وكيف تبني منها مركزًا قويًا.',
+    strategies: [
+      { id:'italian', title:'الافتتاح الإيطالي', tag:'Italian Game',
+        fen:'r1bqkbnr/pppp1ppp/2n5/4p3/2B1P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3',
+        desc:'من أقدم الافتتاحيات وأكثرها وضوحًا: يطوّر الأبيض قطعه بسرعة ويوجّه الفيل نحو نقطة f7 الحساسة أمام الملك الأسود.',
+        tip:'حاول إكمال تطوير قطعك (الفيل والحصان) قبل التفكير في أي هجوم مباشر، ولا تُخرج نفس القطعة مرتين في الافتتاح.' },
+      { id:'sicilian', title:'الدفاع الصقلي', tag:'Sicilian Defense',
+        fen:'rnbqkbnr/pp1ppppp/8/2p5/4P3/8/PPPP1PPP/RNBQKBNR w KQkq c6 0 2',
+        desc:'رد الأسود الأكثر شهرة في مواجهة 1.e4، يمنح الأسود لعبًا غير متماثل وفرصًا هجومية على الجناح الملكي.',
+        tip:'لاحظ كيف يتحكّم بيدق c5 في مربع d4 دون إغلاق المركز، مما يمنح الأسود مرونة أكبر في الخطط اللاحقة.' },
+      { id:'queens-gambit', title:'مبادلة الملكة', tag:"Queen's Gambit",
+        fen:'rnbqkbnr/ppp1pppp/8/3p4/2PP4/8/PP2PPPP/RNBQKBNR b KQkq c3 0 2',
+        desc:'افتتاح كلاسيكي يعرض فيه الأبيض بيدق c4 مؤقتًا لبناء سيطرة مركزية أقوى ببيدقي d4 وc4.',
+        tip:'إن قبل الأسود البيدق (dxc4) لن يستطيع الاحتفاظ به بسهولة؛ ركّز على استعادة السيطرة المركزية بسرعة.' },
+    ],
+  },
+  middlegame: {
+    label: 'وسط الدور', icon: '♛',
+    desc: 'هنا تُحسَم أغلب المباريات. تدرّب على التكتيكات والخطط التي تحوّل الأفضلية الصغيرة إلى هجوم حاسم.',
+    strategies: [
+      { id:'pin', title:'التثبيت (Pin)', tag:'Tactic',
+        fen:'r1bqkbnr/pppp1ppp/2n5/1B2p3/4P3/5N2/PPPP1PPP/RNBQK2R b KQkq - 3 3',
+        desc:'فيل الأبيض على b5 "يثبّت" حصان c6 بشكل نسبي أمام الملك الأسود على القطر نفسه، مما يقيّد حركته.',
+        tip:'ابحث دائمًا عن قطع الخصم التي تقع على نفس الخط أو القطر أو الصف الذي يقع فيه ملكه أو قطعة قيّمة أخرى.' },
+      { id:'fork', title:'الشوكة (Fork)', tag:'Tactic',
+        fen:'r1bqk2r/ppp2ppp/2n2n2/3p4/1b1P4/2N1PN2/PPP2PPP/R1BQKB1R w KQkq - 0 7',
+        desc:'الحصان قطعة مثالية لتنفيذ "الشوكة": حركة واحدة تهدّد قطعتين أو أكثر في الوقت نفسه.',
+        tip:'ابحث عن مربع يمكن لحصانك الوصول إليه ويهاجم منه هدفين قيّمين معًا، كالملك والرخ مثلًا.' },
+      { id:'outpost', title:'البؤرة المتقدّمة', tag:'Strategy',
+        fen:'r1bq1rk1/ppp2ppp/2n2n2/3Np3/1b2P3/2N5/PPP2PPP/R1BQ1RK1 w - - 0 1',
+        desc:'حصان الأبيض على d5 يقف على "بؤرة متقدّمة" محمية من بيدق ولا يمكن مهاجمتها ببيادق الخصم.',
+        tip:'البؤرة المتقدّمة المثالية تكون في مركز الرقعة أو قريبًا منه، ومحصّنة ببيدق صديق، وبعيدة عن بيادق الخصم.' },
+    ],
+  },
+  endgame: {
+    label: 'النهايات', icon: '♚',
+    desc: 'مع قلة القطع تصبح الدقة أهم من أي وقت آخر. تعلّم مبادئ النهايات الأساسية التي يحتاجها كل لاعب.',
+    strategies: [
+      { id:'opposition', title:'مبدأ التعارض', tag:'King & Pawn',
+        fen:'8/8/4k3/4P3/4K3/8/8/8 w - - 0 1',
+        desc:'من أهم مبادئ نهايات الملك والبيدق: من يملك "التعارض" (Opposition) يستطيع فرض تقدّم بيدقه للترقية.',
+        tip:'حاول أن تُبقي ملكك في مواجهة مباشرة مع ملك الخصم بحيث يكون الدور عليه للتحرّك — هذا يمنحك زمام السيطرة.' },
+      { id:'rook-cutoff', title:'قطع الطريق بالرخ', tag:'Rook Endgame',
+        fen:'8/8/8/8/4k3/8/4R3/4K3 w - - 0 1',
+        desc:'الرخ قطعة قوية جدًا في النهايات؛ استخدامه لقطع طريق الملك المعادي يمنعه من التدخّل في اللعب.',
+        tip:'ضع رخّك على صفّ أو خط يفصل ملك الخصم عن الحدث الرئيسي في الرقعة، ثم قدّم ملكك أو بيادقك بأمان.' },
+      { id:'stalemate', title:'الحذر من الخنوع', tag:'Stalemate Awareness',
+        fen:'k7/8/2Q5/8/8/8/8/7K b - - 0 1',
+        desc:'"الخنوع" (Stalemate) يحدث حين لا يملك اللاعب أي حركة قانونية دون أن يكون ملكه في وضع كش — وتكون النتيجة تعادلًا فوريًا.',
+        tip:'عندما تكون في وضع رابح بأفضلية كبيرة، احذر من حصر ملك الخصم دون أن يكون في كش؛ تأكد دائمًا من ترك حركة قانونية له أو إعطائه كش مباشر.' },
+    ],
+  },
+};
+
+/* ======================= NAVIGATION ======================= */
+let currentCategory = null;
+
+function showView(name){
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  const el = document.getElementById('view-'+name);
+  el.classList.add('active');
+  el.classList.remove('fade-in');
+  requestAnimationFrame(()=>el.classList.add('fade-in'));
+  document.querySelectorAll('.nav-link').forEach(n=>n.classList.remove('current'));
+  const navMap = { home:'home', strategies:'strategies' };
+  if(navMap[name]) document.querySelector(`[data-nav="${navMap[name]}"]`)?.classList.add('current');
+  window.scrollTo({top:0, behavior:'smooth'});
+  if(name === 'strategies') renderCategoryGrid();
+}
+
+function toggleMenu(){
+  document.getElementById('mobileMenu').classList.toggle('hidden');
+}
+
+function renderCategoryGrid(){
+  const grid = document.getElementById('categoryGrid');
+  grid.innerHTML = '';
+  Object.entries(CATEGORIES).forEach(([key, cat])=>{
+    grid.innerHTML += `
+      <button onclick="goCategory('${key}')" class="cat-card text-right bg-charcoal text-ivory rounded-2xl p-8 border border-gold/20 hover:border-gold">
+        <span class="text-4xl">${cat.icon}</span>
+        <h3 class="font-display text-2xl mt-4 mb-2">${cat.label}</h3>
+        <p class="text-ivory/60 text-sm leading-relaxed mb-4">${cat.desc}</p>
+        <span class="text-gold text-sm font-bold">${cat.strategies.length} استراتيجيات ←</span>
+      </button>`;
+  });
+}
+
+function goCategory(key){
+  currentCategory = key;
+  const cat = CATEGORIES[key];
+  showView('category');
+  document.getElementById('categoryHeader').innerHTML = `
+    <p class="text-gold font-mono text-xs tracking-widest mb-2">${cat.icon} ${key.toUpperCase()}</p>
+    <h1 class="font-display text-4xl mb-3">${cat.label}</h1>
+    <p class="text-charcoal/60 max-w-2xl">${cat.desc}</p>`;
+  const list = document.getElementById('strategyList');
+  list.innerHTML = cat.strategies.map(s=>`
+    <button onclick="goStrategy('${s.id}')" class="text-right bg-white hover:bg-ivory-2 rounded-xl p-6 border border-charcoal/10 hover:border-emerald transition-colors">
+      <p class="text-emerald font-mono text-xs mb-1">${s.tag}</p>
+      <h3 class="font-display text-xl mb-2">${s.title}</h3>
+      <p class="text-charcoal/60 text-sm leading-relaxed">${s.desc}</p>
+    </button>`).join('');
+}
+
+function findStrategy(id){
+  for(const cat of Object.values(CATEGORIES)){
+    const found = cat.strategies.find(s=>s.id===id);
+    if(found) return found;
+  }
+  return null;
+}
+
+function goStrategy(id){
+  const s = findStrategy(id);
+  if(!s) return;
+  showView('practice');
+  document.getElementById('practiceEyebrow').textContent = s.tag;
+  document.getElementById('practiceTitle').textContent = s.title;
+  document.getElementById('practiceDesc').textContent = s.desc;
+  document.getElementById('practiceTip').textContent = s.tip;
+  document.getElementById('backToCategoryBtn').onclick = ()=> currentCategory ? goCategory(currentCategory) : showView('strategies');
+  startPosition(s.fen);
+}
+
+/* ======================= CHESS BOARD ======================= */
+const PIECE_GLYPHS = {
+  p:'♟', r:'♜', n:'♞', b:'♝', q:'♛', k:'♚',
+};
+let game = null;
+let boardFlipped = false;
+let selectedSquare = null;
+let legalTargets = [];
+let initialFen = null;
+let lastMove = null;
+
+function startPosition(fen){
+  initialFen = fen;
+  game = new Chess(fen);
+  boardFlipped = false;
+  selectedSquare = null;
+  legalTargets = [];
+  lastMove = null;
+  renderBoard();
+  updateStatus();
+}
+
+function resetPosition(){
+  game = new Chess(initialFen);
+  selectedSquare = null;
+  legalTargets = [];
+  lastMove = null;
+  renderBoard();
+  updateStatus();
+}
+
+function undoMove(){
+  game.undo();
+  selectedSquare = null;
+  legalTargets = [];
+  renderBoard();
+  updateStatus();
+}
+
+function flipBoard(){
+  boardFlipped = !boardFlipped;
+  renderBoard();
+}
+
+function squareId(fileIdx, rankIdx){
+  // fileIdx 0-7 -> a-h, rankIdx 0-7 -> 8..1 (row0 = rank8)
+  const files = ['a','b','c','d','e','f','g','h'];
+  return files[fileIdx] + (8 - rankIdx);
+}
+
+function renderBoard(){
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  const files = ['a','b','c','d','e','f','g','h'];
+  const ranks = [8,7,6,5,4,3,2,1];
+  const orderedRanks = boardFlipped ? [...ranks].reverse() : ranks;
+  const orderedFiles = boardFlipped ? [...files].reverse() : files;
+
+  const pos = game.board(); // 8x8 array, row0 = rank8
+
+  orderedRanks.forEach((rank, rIdx)=>{
+    orderedFiles.forEach((file, fIdx)=>{
+      const sqName = file + rank;
+      const rowInPos = 8 - rank; // index into game.board() rows
+      const colInPos = files.indexOf(file);
+      const piece = pos[rowInPos][colInPos];
+
+      const isLight = (files.indexOf(file) + rank) % 2 === 0;
+      const div = document.createElement('div');
+      div.className = 'sq ' + (isLight ? 'light' : 'dark');
+      div.dataset.square = sqName;
+      div.setAttribute('role','gridcell');
+      div.setAttribute('aria-label', sqName);
+
+      if(selectedSquare === sqName) div.classList.add('selected');
+      if(lastMove && (lastMove.from === sqName || lastMove.to === sqName)) div.classList.add('last-move');
+
+      if(piece){
+        const span = document.createElement('span');
+        span.textContent = PIECE_GLYPHS[piece.type];
+        span.className = piece.color === 'w' ? 'piece-white' : 'piece-black';
+        div.appendChild(span);
+      }
+
+      if(legalTargets.includes(sqName)){
+        const marker = document.createElement('span');
+        marker.className = piece ? 'ring' : 'dot';
+        div.appendChild(marker);
+      }
+
+      // coordinate labels on edges
+      if(rIdx === 7){
+        const c = document.createElement('span');
+        c.className = 'coord file'; c.textContent = file;
+        div.appendChild(c);
+      }
+      if(fIdx === 0){
+        const c = document.createElement('span');
+        c.className = 'coord rank'; c.textContent = rank;
+        div.appendChild(c);
+      }
+
+      div.addEventListener('click', ()=> onSquareClick(sqName));
+      board.appendChild(div);
+    });
+  });
+}
+
+function onSquareClick(sqName){
+  if(game.game_over()) return;
+
+  if(selectedSquare === sqName){
+    selectedSquare = null; legalTargets = [];
+    renderBoard();
+    return;
+  }
+
+  if(selectedSquare && legalTargets.includes(sqName)){
+    const move = game.move({ from: selectedSquare, to: sqName, promotion:'q' });
+    if(move){
+      lastMove = move;
+      selectedSquare = null; legalTargets = [];
+      renderBoard();
+      updateStatus();
+      return;
+    }
+  }
+
+  const piece = game.get(sqName);
+  if(piece && piece.color === game.turn()){
+    selectedSquare = sqName;
+    legalTargets = game.moves({ square: sqName, verbose:true }).map(m=>m.to);
+  } else {
+    selectedSquare = null; legalTargets = [];
+  }
+  renderBoard();
+}
+
+function updateStatus(){
+  const turnEl = document.getElementById('turnIndicator');
+  const statusEl = document.getElementById('statusText');
+  turnEl.textContent = game.turn() === 'w' ? 'دور: الأبيض' : 'دور: الأسود';
+
+  if(game.in_checkmate()){
+    statusEl.textContent = 'كش ملك! انتهت اللعبة — ' + (game.turn()==='w' ? 'الأسود' : 'الأبيض') + ' يفوز.';
+  } else if(game.in_stalemate()){
+    statusEl.textContent = 'تعادل بسبب الخنوع (Stalemate) — لا توجد حركات قانونية.';
+  } else if(game.in_draw()){
+    statusEl.textContent = 'تعادل.';
+  } else if(game.in_check()){
+    statusEl.textContent = 'الملك في وضع كش! يجب الخروج منه فورًا.';
+  } else {
+    statusEl.textContent = 'اضغط على قطعتك ثم على المربع الذي تريد الانتقال إليه.';
+  }
+
+  const moveListEl = document.getElementById('moveList');
+  const history = game.history();
+  if(history.length === 0){
+    moveListEl.innerHTML = '<span class="text-ivory/40">لم تُلعب أي حركة بعد</span>';
+  } else {
+    let out = '';
+    for(let i=0;i<history.length;i+=2){
+      const num = i/2 + 1;
+      out += `<span>${num}. ${history[i] || ''} ${history[i+1] || ''}</span>`;
+    }
+    moveListEl.innerHTML = out;
+  }
+}
+
+/* init */
+renderCategoryGrid();
+</script>
+</body>
+</html>
